@@ -1,0 +1,169 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <time.h>
+
+#define START_DIGITS 100000
+#define PRINT_INTERVAL 10000
+#define BLOCK_SIZE 9
+#define START_DIGIT 2
+
+#define BLOCK_BASE 1000000000
+
+typedef struct {
+    uint32_t *digits;
+    int len;
+} BigNum;
+
+BigNum create_start_number(int n_digits, int digit) {
+    int blocks = (n_digits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    uint32_t *digits = (uint32_t*)calloc(blocks, sizeof(uint32_t));
+    
+    uint32_t fill_block = 0;
+    for (int i = 0; i < BLOCK_SIZE; i++) {
+        fill_block = fill_block * 10 + digit;
+    }
+    
+    for (int i = 0; i < blocks; i++) {
+        digits[i] = fill_block;
+    }
+    
+    int last_block_digits = n_digits % BLOCK_SIZE;
+    if (last_block_digits != 0) {
+        uint32_t last_val = 0;
+        for (int i = 0; i < last_block_digits; i++) {
+            last_val = last_val * 10 + digit;
+        }
+        digits[blocks - 1] = last_val;
+    }
+    
+    return (BigNum){digits, blocks};
+}
+
+void mul3_add1(BigNum *n) {
+    uint64_t carry = 1;
+    for (int i = 0; i < n->len; i++) {
+        uint64_t val = (uint64_t)n->digits[i] * 3 + carry;
+        n->digits[i] = val % BLOCK_BASE;
+        carry = val / BLOCK_BASE;
+    }
+    if (carry > 0) {
+        n->len++;
+        n->digits = (uint32_t*)realloc(n->digits, n->len * sizeof(uint32_t));
+        n->digits[n->len - 1] = carry;
+    }
+}
+
+void div2(BigNum *n) {
+    uint64_t rem = 0;
+    for (int i = n->len - 1; i >= 0; i--) {
+        uint64_t cur = rem * BLOCK_BASE + n->digits[i];
+        n->digits[i] = cur / 2;
+        rem = cur % 2;
+    }
+    while (n->len > 1 && n->digits[n->len - 1] == 0) {
+        n->len--;
+    }
+}
+
+int is_one(BigNum *n) {
+    return n->len == 1 && n->digits[0] == 1;
+}
+
+int count_digits(BigNum *n) {
+    if (n->len == 0) return 0;
+    int digits = (n->len - 1) * BLOCK_SIZE;
+    uint32_t last = n->digits[n->len - 1];
+    while (last > 0) {
+        digits++;
+        last /= 10;
+    }
+    return digits;
+}
+
+void free_bignum(BigNum *n) {
+    free(n->digits);
+    n->digits = NULL;
+    n->len = 0;
+}
+
+int main() {
+    clock_t start_time = clock();
+    
+    BigNum num = create_start_number(START_DIGITS, START_DIGIT);
+    long long step = 0;
+    
+    long long total_mul = 0, total_div = 0;
+    long long length_increase_mul = 0, length_decrease_div = 0;
+    int max_length = START_DIGITS;
+    long long step_of_max_length = 0;
+    int prev_length = START_DIGITS;
+    
+    printf("Starting number: %d digits of '%d' (%d...%d)\n", 
+           START_DIGITS, START_DIGIT, START_DIGIT, START_DIGIT);
+    printf("Print interval: %d steps\n", PRINT_INTERVAL);
+    printf("Block size: %d digits per block\n\n", BLOCK_SIZE);
+    
+    while (!is_one(&num)) {
+        step++;
+        
+        int is_even = (num.digits[0] % 2 == 0);
+        int old_len = count_digits(&num);
+        
+        if (is_even) {
+            div2(&num);
+            total_div++;
+            int new_len = count_digits(&num);
+            length_decrease_div += (old_len - new_len);
+        } else {
+            mul3_add1(&num);
+            total_mul++;
+            int new_len = count_digits(&num);
+            length_increase_mul += (new_len - old_len);
+        }
+        
+        int current_len = count_digits(&num);
+        
+        if (current_len > max_length) {
+            max_length = current_len;
+            step_of_max_length = step;
+        }
+        
+        if (PRINT_INTERVAL > 0 && step % PRINT_INTERVAL == 0) {
+            printf("Step: %8lld | Length: %7d digits | Op: %s\n", 
+                   step, current_len, is_even ? "DIV" : "MUL");
+        }
+    }
+    
+    clock_t end_time = clock();
+    double elapsed = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    
+    printf("\n========== RESULT ==========\n");
+    printf("Started with: %d digits of '%d' (%d digits)\n", START_DIGITS, START_DIGIT, START_DIGITS);
+    printf("Reached 1 in %lld steps\n", step);
+    printf("Total time: %.2f seconds\n", elapsed);
+    
+    printf("\n========== STATISTICS ==========\n");
+    printf("0) Starting digit: %d\n", START_DIGIT);
+    printf("1) Number of digits in start: %d\n", START_DIGITS);
+    printf("2) Total steps: %lld\n", step);
+    printf("3) Execution time: %.2f seconds\n", elapsed);
+    printf("4) Peak length (%d digits) at step: %lld\n", max_length, step_of_max_length);
+    
+    double avg_up = (total_mul > 0) ? (double)length_increase_mul / total_mul : 0.0;
+    double avg_down = (total_div > 0) ? (double)length_decrease_div / total_div : 0.0;
+    printf("5) Average increase per MUL: %.4f digits\n", avg_up);
+    printf("   Average decrease per DIV: %.4f digits\n", avg_down);
+    
+    printf("6) Approximated function: L(t) ≈ %.0f - %.4f * t (linear fit from start to 1)\n", 
+           (double)START_DIGITS, (double)(START_DIGITS - 1) / step);
+    
+    printf("\nAdditional info:\n");
+    printf("   Total MUL operations: %lld\n", total_mul);
+    printf("   Total DIV operations: %lld\n", total_div);
+    printf("   Ratio MUL/DIV: %.3f\n", (double)total_mul / total_div);
+    
+    free_bignum(&num);
+    return 0;
+}
